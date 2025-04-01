@@ -4,36 +4,22 @@ import numpy as np
 from deap import base, creator, tools
 import matplotlib.pyplot as plt
 
-# -----------------------------------------------------------------------------
-# Parameters
-# -----------------------------------------------------------------------------
 N = 12
 C = 0.9
 MAX_EDGES = N * (N - 1) // 2
 INI_POP = 200
 
-CXPB = 0.7  # Probability of crossover
-MUTPB = 0.8 # Probability of mutation
+CXPB = 0.7 
+MUTPB = 0.8 
 
-# We no longer have NGEN
-# Instead, we define a 'STALE_GEN'
-STALE_GEN = 10  # e.g., if the max cost doesn't improve for 5 gens, stop.
+STALE_GEN = 10
 
-# -----------------------------------------------------------------------------
-# DEAP Setup
-# -----------------------------------------------------------------------------
 creator.create("FitnessMax", base.Fitness, weights=(1.0,))
 creator.create("Individual", list, fitness=creator.FitnessMax)
 toolbox = base.Toolbox()
 
-# -----------------------------------------------------------------------------
-# 1) Generate a Random Tree via Prufer-code
-# -----------------------------------------------------------------------------
 def random_tree(num_nodes):
-    """
-    Generate a random tree on [0..num_nodes-1] using a random Prufer code.
-    Return a list of edges (u, v).
-    """
+
     if num_nodes <= 1:
         return []
 
@@ -56,7 +42,6 @@ def random_tree(num_nodes):
             import bisect
             bisect.insort(leaves, node)
 
-    # Connect the final two leaves
     leaf1 = leaves.pop(0)
     leaf2 = leaves.pop(0)
     edges.append((leaf1, leaf2))
@@ -66,15 +51,8 @@ def random_tree(num_nodes):
 toolbox.register("individual", tools.initIterate, creator.Individual,
                  lambda: random_tree(N))
 
-# -----------------------------------------------------------------------------
-# 2) Fitness Evaluation — maximize a negative cost
-# -----------------------------------------------------------------------------
 def evaluate(individual):
-    """
-    Build a graph from 'individual' (list of edges).
-    If connected, compute cost = -(3*alpha*avgDist/(N+1)) - (2*(1-alpha)*E/(N*(N-1))).
-    If disconnected, return -1000.
-    """
+
     G = nx.Graph()
     G.add_nodes_from(range(N))
     G.add_edges_from(individual)
@@ -90,9 +68,6 @@ def evaluate(individual):
 
 toolbox.register("evaluate", evaluate)
 
-# -----------------------------------------------------------------------------
-# 3) Crossover Operator
-# -----------------------------------------------------------------------------
 def cxVariableEdges(ind1, ind2):
     edge_set1, edge_set2 = set(ind1), set(ind2)
     common = edge_set1 & edge_set2
@@ -111,7 +86,6 @@ def cxVariableEdges(ind1, ind2):
         G = nx.Graph()
         G.add_nodes_from(range(N))
         G.add_edges_from(edges)
-        # If disconnected, add edges until connected
         while not nx.is_connected(G):
             potential_edges = list(nx.non_edges(G))
             new_edge = random.choice(potential_edges)
@@ -124,17 +98,8 @@ def cxVariableEdges(ind1, ind2):
 
 toolbox.register("mate", cxVariableEdges)
 
-# -----------------------------------------------------------------------------
-# 4) Mutation Operator — Toggle the single best edge
-# -----------------------------------------------------------------------------
 def mutToggleBestEdge(individual):
-    """
-    For each possible edge in the complete graph on N nodes, toggle it
-    in a copy of the individual's edges. Evaluate the cost. 
-    Pick the toggle that yields the highest (least negative) cost.
-    If that best toggle is > old cost, adopt it; otherwise, do nothing.
-    Exactly one toggle or none is performed.
-    """
+
     def get_cost(edges_list):
         return toolbox.evaluate(edges_list)[0]
 
@@ -171,23 +136,15 @@ def mutToggleBestEdge(individual):
 
 toolbox.register("mutate", mutToggleBestEdge)
 
-# -----------------------------------------------------------------------------
-# 5) Selection Operator
-# -----------------------------------------------------------------------------
 toolbox.register("select", tools.selTournament, tournsize=5)
 
-# -----------------------------------------------------------------------------
-# 6) GA Optimization — Terminate After X Consecutive Gens with Same Max
-# -----------------------------------------------------------------------------
 def main():
     random.seed(42)
 
-    # Create initial population of size INI_POP
     pop = [toolbox.individual() for _ in range(INI_POP)]
 
     print("Starting Evolution Process:")
 
-    # For tracking stagnation
     stagnation_count = 0
     previous_best = None
 
@@ -195,58 +152,47 @@ def main():
     while True:
         generation += 1
 
-        # Select parents
         offspring = toolbox.select(pop, len(pop))
-        # Clone them
         offspring = list(map(toolbox.clone, offspring))
 
-        # Crossover
         for child1, child2 in zip(offspring[::2], offspring[1::2]):
             if random.random() < CXPB:
                 toolbox.mate(child1, child2)
                 del child1.fitness.values, child2.fitness.values
 
-        # Mutation
         for mutant in offspring:
             if random.random() < MUTPB:
                 toolbox.mutate(mutant)
                 del mutant.fitness.values
 
-        # Evaluate fitness of any invalid offspring
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
         fitnesses = map(toolbox.evaluate, invalid_ind)
         for ind, fit in zip(invalid_ind, fitnesses):
             ind.fitness.values = fit
 
-        # Replace old population with offspring
         pop[:] = offspring
 
-        # Compute stats
         fits = [ind.fitness.values[0] for ind in pop]
         current_best = max(fits)
 
         print(f"Gen {generation}: Max Cost = {current_best:.4f}")
 
-        # Check if best cost is the same as the previous generation's best
         if previous_best is not None and current_best == previous_best:
             stagnation_count += 1
         else:
             stagnation_count = 0
             previous_best = current_best
 
-        # If we have stagnated for STALE_GEN consecutive gens, stop
         if stagnation_count >= STALE_GEN:
             print(f"Terminating after {STALE_GEN} consecutive stagnant generations.")
             break
 
-    # Final Results
     best_individual = tools.selBest(pop, 1)[0]
 
     # Build the best graph
     G_best = nx.Graph()
     G_best.add_edges_from(best_individual)
 
-    # Convert best graph to adjacency matrix
     adj_matrix = nx.to_numpy_array(G_best, nodelist=range(N))
 
     alpha = C * (N + 1) / (N + 4)
@@ -254,7 +200,6 @@ def main():
     for row in adj_matrix:
         print(" ".join(str(int(elem)) for elem in row))
 
-    # Also visualize
     nx.draw(G_best, with_labels=True, node_color='lightblue', edge_color='gray')
     plt.title("Optimized Graph (Highest Cost)")
     plt.show()
